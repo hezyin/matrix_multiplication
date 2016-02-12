@@ -4,8 +4,8 @@ const char* dgemm_desc = "Multiple transpose blocked dgemm, 16, 42, 4.";
 
 /*code does not yet work; there's some error on memory allocation*/
 /*#if !defined(BLOCK_SIZE)*/
-#define BLOCK_SIZE_L1 16
-#define BLOCK_SIZE_L2 42
+#define BLOCK_SIZE_L1 42
+#define BLOCK_SIZE_L2 98
 #define t_block_size 4
 /*#endif*/
 /*original block_size 41*/
@@ -78,6 +78,14 @@ static void transpose (int lda, double* B, double* t_B)
 	}
 }
 
+static void transpose_naive(int lda, double* B, double* t_B){
+	for(int i=0; i<lda;i++){
+		for(int j=0;j<lda;j++){
+			t_B[j+i*lda] = B[i+j*lda];
+		}
+	}
+}
+
 /* This routine performs a dgemm operation
  *  C := C + A * B
  * where A, B, and C are lda-by-lda matrices stored in column-major format. 
@@ -113,9 +121,9 @@ void square_dgemm (int lda, double* A, double* B, double* C)
 {
 	double* mem = NULL;
 	mem = (double*) malloc(lda*lda*sizeof(double*));
-	printf("whoo");
+	/*printf("whoo");*/
 	double* t_B = mem + 0;
-	transpose(lda, B, t_B);
+	transpose_naive(lda, B, t_B);
   /* For each block-row of A */ 
   for (int i = 0; i < lda; i += BLOCK_SIZE_L2)
     /* For each block-column of B */
