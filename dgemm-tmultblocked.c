@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
-const char* dgemm_desc = "Multiple transpose blocked dgemm, 16, 42, 4.";
+#include <xmmintrin.h>
+#include <emmintrin.h>
+const char* dgemm_desc = "Multiple transpose blocked dgemm, 98, 42, 16.";
 
 /*code does not yet work; there's some error on memory allocation*/
 /*#if !defined(BLOCK_SIZE)*/
@@ -86,6 +88,36 @@ static void transpose_naive(int lda, double* B, double* t_B){
 	}
 }
 
+inline void _MM_TRANSPOSE2_PD(__m128d d1, __m128d d2)
+{
+	__m128d tmp = _mm_shuffle_pd(d1, d2, _MM_SHUFFLE2(0,0));
+	d2 = _mm_shuffle_pd(d1, d2, _MM_SHUFFLE2(1,1));
+	d1 = tmp;
+}
+
+inline void transpose2x2_SSE(double* B, double* t_B, const int lda) {
+	__m128d row1 = _mm_load_pd(B+0*lda);
+    __m128d row2 = _mm_load_pd(B+1*lda);
+    _MM_TRANSPOSE2_PD(row1, row2);
+    _mm_store_pd(t_B+0*lda, row1);
+    _mm_store_pd(t_B+1*lda, row2);
+}
+
+inline void transpose_block_SSE2x2(double* B, double* t_B, const int lda) {
+    /*pragma omp parallel for*/
+    for(int i=0; i<lda; i+=t_block_size) {
+        for(int j=0; j<lda; j+=t_block_size) {
+            int max_i2 = i+t_block_size < lda ? i + t_block_size : lda;
+            int max_j2 = j+t_block_size < lda ? j + t_block_size : lda;
+            for(int i2=i; i2<max_i2; i2+=2) {
+                for(int j2=j; j2<max_j2; j2+=2) {
+                    transpose2x2_SSE(B+i2*lda +j2, t_B+ j2*lda + i2, lda);
+                }
+            }
+        }
+    }
+}
+
 /* This routine performs a dgemm operation
  *  C := C + A * B
  * where A, B, and C are lda-by-lda matrices stored in column-major format. 
@@ -123,7 +155,7 @@ void square_dgemm (int lda, double* A, double* B, double* C)
 	mem = (double*) malloc(lda*lda*sizeof(double*));
 	/*printf("whoo");*/
 	double* t_B = mem + 0;
-	transpose_naive(lda, B, t_B);
+	transpose_block_SSE2x2(B, t_B, lda);
   /* For each block-row of A */ 
   for (int i = 0; i < lda; i += BLOCK_SIZE_L2)
     /* For each block-column of B */
