@@ -37,7 +37,7 @@ static inline void matmul_4xkxkx4(int lda, int K, double* a, double* b, double* 
   // for every column of a (or every row of b)
   for (int i = 0; i < K; ++i) 
   {
-    a_coli = _mm256_loadu_pd(a);
+    a_coli = _mm256_load_pd(a);
     a += 4;
 
     bi0 = _mm256_broadcast_sd(b++);
@@ -55,86 +55,6 @@ static inline void matmul_4xkxkx4(int lda, int K, double* a, double* b, double* 
   _mm256_storeu_pd(c01_ptr, c_col1);
   _mm256_storeu_pd(c02_ptr, c_col2);
   _mm256_storeu_pd(c03_ptr, c_col3);
-}
-
-static inline void matmul_4xkxkx4_unrolled(int lda, int K, double* a, double* b, double* c)
-{
-  __m256d a_coli_l, a_coli_r, bi0, bi1, bi2, bi3, bi4, bi5, bi6, bi7;
-  __m256d c_col0, c_col1, c_col2, c_col3, c_col4, c_col5, c_col6, c_col7;
-
-  /* layout of 4x4 c matrix
-      00 01 02 03
-      10 11 12 13
-      20 21 22 23
-      30 31 32 33
-  */
-  double* c01_ptr = c + lda;
-  double* c02_ptr = c01_ptr + lda;
-  double* c03_ptr = c02_ptr + lda;
-
-  // load old value of c
-  c_col0 = _mm256_load_pd(c);
-  c_col1 = _mm256_load_pd(c01_ptr);
-  c_col2 = _mm256_load_pd(c02_ptr);
-  c_col3 = _mm256_load_pd(c03_ptr);
-
-  c_col4 = _mm256_setzero_pd();
-  c_col5 = _mm256_setzero_pd();
-  c_col6 = _mm256_setzero_pd();
-  c_col7 = _mm256_setzero_pd();
-
-  // for every column of a (or every row of b)
-  int K_floor = K - (K % 2);
-  for (int i = 0; i < K_floor; i += 2) 
-  {
-    a_coli_l = _mm256_load_pd(a);
-    a += 4;
-    a_coli_r = _mm256_load_pd(a);
-    a += 4;
-
-    bi0 = _mm256_broadcast_sd(b++);
-    bi1 = _mm256_broadcast_sd(b++);
-    bi2 = _mm256_broadcast_sd(b++);
-    bi3 = _mm256_broadcast_sd(b++);
-
-    c_col0 = _mm256_add_pd(c_col0, _mm256_mul_pd(a_coli_l, bi0));
-    c_col1 = _mm256_add_pd(c_col1, _mm256_mul_pd(a_coli_l, bi1));
-    c_col2 = _mm256_add_pd(c_col2, _mm256_mul_pd(a_coli_l, bi2));
-    c_col3 = _mm256_add_pd(c_col3, _mm256_mul_pd(a_coli_l, bi3));
-
-    bi4 = _mm256_broadcast_sd(b++);
-    bi5 = _mm256_broadcast_sd(b++);
-    bi6 = _mm256_broadcast_sd(b++);
-    bi7 = _mm256_broadcast_sd(b++);
-
-    c_col4 = _mm256_add_pd(c_col4, _mm256_mul_pd(a_coli_r, bi4));
-    c_col5 = _mm256_add_pd(c_col5, _mm256_mul_pd(a_coli_r, bi5));
-    c_col6 = _mm256_add_pd(c_col6, _mm256_mul_pd(a_coli_r, bi6));
-    c_col7 = _mm256_add_pd(c_col7, _mm256_mul_pd(a_coli_r, bi7));
-  }
-  if (K % 2 != 0){
-    a_coli_l = _mm256_loadu_pd(a);
-
-    bi0 = _mm256_broadcast_sd(b++);
-    bi1 = _mm256_broadcast_sd(b++);
-    bi2 = _mm256_broadcast_sd(b++);
-    bi3 = _mm256_broadcast_sd(b++);
-
-    c_col0 = _mm256_add_pd(c_col0, _mm256_mul_pd(a_coli_l, bi0));
-    c_col1 = _mm256_add_pd(c_col1, _mm256_mul_pd(a_coli_l, bi1));
-    c_col2 = _mm256_add_pd(c_col2, _mm256_mul_pd(a_coli_l, bi2));
-    c_col3 = _mm256_add_pd(c_col3, _mm256_mul_pd(a_coli_l, bi3));
-  }
-
-  c_col0 = _mm256_add_pd(c_col0, c_col4);
-  c_col1 = _mm256_add_pd(c_col1, c_col5);
-  c_col2 = _mm256_add_pd(c_col2, c_col6);
-  c_col3 = _mm256_add_pd(c_col3, c_col7);
-
-  _mm256_store_pd(c, c_col0);
-  _mm256_store_pd(c01_ptr, c_col1);
-  _mm256_store_pd(c02_ptr, c_col2);
-  _mm256_store_pd(c03_ptr, c_col3);
 }
 
 static inline void copy_a (int lda, const int K, double* a_src, double* a_dst) {
@@ -205,7 +125,9 @@ static inline void do_block (int lda, int M, int N, int K, double* A, double* B,
     /* For each row of A */
     for (i = 0; i < M_floor; i += 4) {
       a_ptr = &A_block[i * K];
-      if (j == 0) copy_a(lda, K, A + i, a_ptr);
+      if (j == 0){
+        copy_a(lda, K, A + i, a_ptr);
+      }
       c = C + i + j*lda;
       matmul_4xkxkx4(lda, K, a_ptr, b_ptr, c);
     }
