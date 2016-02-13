@@ -6,13 +6,11 @@
 
 const char* dgemm_desc = "dgemm with sse acceleration.";
 
-#define min(a,b) (((a)<(b))?(a):(b))
-
 #define BLOCK_L1 256
 #define BLOCK_L2 512
 
 #define ARRAY(A,i,j) (A)[(j)*lda + (i)]
-
+#define min(a,b) (((a)<(b))?(a):(b))
 
 static inline void matmul_4xkxkx4(int lda, int K, double* a, double* b, double* c)
 {
@@ -36,8 +34,7 @@ static inline void matmul_4xkxkx4(int lda, int K, double* a, double* b, double* 
   c_col3 = _mm256_loadu_pd(c03_ptr);
 
   // for every column of a (or every row of b)
-  int i = 0;
-  for (; i < K; ++i) 
+  for (int i = 0; i < K; ++i) 
   {
     a_coli = _mm256_loadu_pd(a);
     a += 4;
@@ -139,23 +136,6 @@ static inline void matmul_4xkxkx4_unrolled(int lda, int K, double* a, double* b,
   _mm256_storeu_pd(c03_ptr, c_col3);
 }
 
-// this function assumes data is stored in col-major
-// if data is in row major, call it like matmul4x4(B, A, C)
-void matmul4x4(double *A, double *B, double *C) {
-    __m256d col[4], sum[4];
-    //load every column into registers
-    for(int i=0; i<4; i++)  
-      col[i] = _mm256_load_pd(&A[i*4]);
-    for(int i=0; i<4; i++) {
-        sum[i] = _mm256_setzero_pd();      
-        for(int j=0; j<4; j++) {
-            sum[i] = _mm256_add_pd(_mm256_mul_pd(_mm256_set1_pd(B[i*4+j]), col[j]), sum[i]);
-        }           
-    }
-    for(int i=0; i<4; i++) 
-      _mm256_store_pd(&C[i*4], sum[i]); 
-}
-
 static inline void copy_a (int lda, const int K, double* a_src, double* a_dst) {
   for (int i = 0; i < K; ++i) 
   {
@@ -181,6 +161,23 @@ static inline void copy_b (int lda, const int K, double* b_src, double* b_dst) {
   }
 }
 
+// this function assumes data is stored in col-major
+// if data is in row major, call it like matmul4x4(B, A, C)
+void matmul4x4(double *A, double *B, double *C) {
+    __m256d col[4], sum[4];
+    //load every column into registers
+    for(int i=0; i<4; i++)  
+      col[i] = _mm256_load_pd(&A[i*4]);
+    for(int i=0; i<4; i++) {
+        sum[i] = _mm256_setzero_pd();      
+        for(int j=0; j<4; j++) {
+            sum[i] = _mm256_add_pd(_mm256_mul_pd(_mm256_set1_pd(B[i*4+j]), col[j]), sum[i]);
+        }           
+    }
+    for(int i=0; i<4; i++) 
+      _mm256_store_pd(&C[i*4], sum[i]); 
+}
+
 /* This auxiliary subroutine performs a smaller dgemm operation
  *  C := C + A * B
  * where C is M-by-N, A is M-by-K, and B is K-by-N. */
@@ -189,30 +186,33 @@ static inline void do_block (int lda, int M, int N, int K, double* A, double* B,
   double A_block[M*K], B_block[K*N];
   double *a_ptr, *b_ptr, *c;
 
-  int Nmax = N-3;
-  int Mmax = M-3;
-  int fringe1 = M%4;
-  int fringe2 = N%4;
+  //posix_memalign((void **)&A_block, 64, M * K * sizeof(double));
+  //posix_memalign((void **)&B_block, 64, K * N * sizeof(double));
+
+  int residue1 = M % 4;
+  int residue2 = N % 4;
+
+  int M_floor = M - residue1;
+  int N_floor = N - residue2;
 
   int i = 0, j = 0, p = 0;
 
   /* For each column of B */
-  for (j = 0 ; j < Nmax; j += 4) 
+  for (j = 0 ; j < N_floor; j += 4) 
   {
-    b_ptr = &B_block[j*K];
+    b_ptr = &B_block[K * j];
     // copy and transpose B_block
     copy_b(lda, K, B + j*lda, b_ptr);
     /* For each row of A */
-    for (i = 0; i < Mmax; i += 4) {
-      a_ptr = &A_block[i*K];
+    for (i = 0; i < M_floor; i += 4) {
+      a_ptr = &A_block[i * K];
       if (j == 0) copy_a(lda, K, A + i, a_ptr);
       c = C + i + j*lda;
-      //matmul4x4(a_ptr, b_ptr, c);
       matmul_4xkxkx4(lda, K, a_ptr, b_ptr, c);
     }
   }
 
-  if (fringe1 != 0) 
+  if (residue1 != 0) 
   {
     /* For each row of A */
     for ( ; i < M; ++i)
@@ -226,13 +226,12 @@ static inline void do_block (int lda, int M, int N, int K, double* A, double* B,
         ARRAY(C,i,p) = c_ip;
       }
   }
-  if (fringe2 != 0) 
+  if (residue2 != 0) 
   {
-    Mmax = M - fringe1;
     /* For each column of B */
     for ( ; j < N; ++j)
       /* For each row of A */ 
-      for (i = 0; i < Mmax; ++i) 
+      for (i = 0; i < M_floor; ++i) 
       {
         /* Compute C[i,j] */
         double cij = ARRAY(C,i,j);
@@ -258,27 +257,44 @@ void print_matrix(double *M, int n_row, int n_col) {
  * where A, B, and C are lda-by-lda matrices stored in column-major format. 
  * On exit, A and B maintain their input values. */  
 
+ /*
+          s
+  _________________
+  |       ------- | 
+  |       |  |  | |
+  |      i------- |  
+t |       |  |  | |
+  |       ------- |
+  |          j    | 
+  |               |
+  |_______________| 
+
+  loop r and k are for accumulation
+
+ */
+
  void square_dgemm (int lda, double* A, double* B, double* C)
 {
+  // reorcder loops for cache efficiency
   for (int t = 0; t < lda; t += BLOCK_L2) 
   {
-    /* For each L2-sized block-column of B */
+    // For each block column of B 
     for (int s = 0; s < lda; s += BLOCK_L2) 
     {
-      /* For each L2-sized block-row of A */ 
+      // For each block row of A 
       for (int r = 0; r < lda; r += BLOCK_L2) 
       {
-        // compute end index of this L2 block
+        // compute end index of smaller block
         int end_k = t + min(BLOCK_L2, lda-t);
         int end_j = s + min(BLOCK_L2, lda-s);
         int end_i = r + min(BLOCK_L2, lda-r);
 
         for (int k = t; k < end_k; k += BLOCK_L1) 
         {
-          /* For each L1-sized block-column of B */
+          // For each block column of B 
           for (int j = s; j < end_j; j += BLOCK_L1) 
           {
-            /* For each L1-sized block-row of A */ 
+            // For each block row of A
             for (int i = r; i < end_i; i += BLOCK_L1) 
             {
               // compute block size
