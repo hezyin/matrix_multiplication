@@ -8,8 +8,8 @@ LDFLAGS = -Wall
 # librt is needed for clock_gettime
 LDLIBS = -framework Accelerate 
 
-targets = benchmark-naive benchmark-blocked benchmark-blas
-objects = benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o  
+targets = benchmark-naive benchmark-blocked benchmark-blas benchmark-sse
+objects = benchmark.o dgemm-naive.o dgemm-blocked.o dgemm-blas.o  dgemm-sse.o
 
 .PHONY : default
 default : all
@@ -22,6 +22,8 @@ benchmark-naive : benchmark.o dgemm-naive.o
 benchmark-blocked : benchmark.o dgemm-blocked.o
 	$(CC) -o $@ $^ $(LDLIBS)
 benchmark-blas : benchmark.o dgemm-blas.o
+	$(CC) -o $@ $^ $(LDLIBS)
+benchmark-sse : benchmark.o dgemm-sse.o
 	$(CC) -o $@ $^ $(LDLIBS)
 
 %.o : %.c
